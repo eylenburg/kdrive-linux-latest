@@ -1,0 +1,65 @@
+name: Update kDrive Latest
+
+on:
+  schedule:
+    - cron: '0 8 * * *'     # Daily at 8 AM UTC (adjust as needed)
+  workflow_dispatch:        # Allows manual trigger from GitHub UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch latest info from Infomaniak
+        id: info
+        run: |
+          JSON=$(curl -sSf https://www.infomaniak.com/drive/latest)
+          
+          # AMD64
+          echo "AMD_URL=$(echo "$JSON" | jq -r '."linux-amd64".downloadurl')" >> $GITHUB_ENV
+          echo "AMD_VERSION=$(echo "$JSON" | jq -r '."linux-amd64".versionstring')" >> $GITHUB_ENV
+          
+          # ARM64
+          echo "ARM_URL=$(echo "$JSON" | jq -r '."linux-arm64".downloadurl')" >> $GITHUB_ENV
+          echo "ARM_VERSION=$(echo "$JSON" | jq -r '."linux-arm64".versionstring')" >> $GITHUB_ENV
+
+      - name: Check current release version
+        id: current
+        run: |
+          CURRENT=$(curl -sSf https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name || echo "none")
+          echo "CURRENT_VERSION=$CURRENT" >> $GITHUB_ENV
+          echo "Current version on GitHub: $CURRENT"
+
+      - name: Download and upload new AMD64 version (if changed)
+        if: env.AMD_VERSION != env.CURRENT_VERSION
+        run: |
+          echo "New AMD64 version detected: ${{ env.AMD_VERSION }}"
+          curl -L --progress-bar -o "kDrive-latest-amd64.AppImage" "${{ env.AMD_URL }}"
+
+      - name: Download and upload new ARM64 version (if changed)
+        if: env.ARM_VERSION != env.CURRENT_VERSION
+        run: |
+          echo "New ARM64 version detected: ${{ env.ARM_VERSION }}"
+          curl -L --progress-bar -o "kDrive-latest-arm64.AppImage" "${{ env.ARM_URL }}"
+
+      - name: Create or update GitHub Release
+        if: env.AMD_VERSION != env.CURRENT_VERSION || env.ARM_VERSION != env.CURRENT_VERSION
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "kDrive Latest Build"
+          body: |
+            Latest kDrive from Infomaniak
+            
+            AMD64: ${{ env.AMD_VERSION }}
+            ARM64: ${{ env.ARM_VERSION }}
+          files: |
+            kDrive-latest-amd64.AppImage
+            kDrive-latest-arm64.AppImage
+          make_latest: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
